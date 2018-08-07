@@ -35,6 +35,8 @@
 
 #include <dlib/global_optimization.h>
 
+#include <tbb/pipeline.h>
+
 // This functions is used to extract information about 
 // sequencing errors. Only if a single cell shows a mutation
 // the error rates will be collected.
@@ -311,44 +313,60 @@ readCellInformation(std::vector<unsigned> & tumorCellPos, std::vector<unsigned> 
 
     std::ifstream inputStream(config.bamFileNames);
 
-    std::vector<std::string> splitVec;
-    std::vector<std::string> splitVecEntry;
+
+
 
     unsigned counter = 0;
-    std::string currLine;
 
-    while(getline(inputStream, currLine))
-    {
-        if (currLine != "")
-        {
-            boost::split(splitVec, currLine, boost::is_any_of("\t"));
-            if (splitVec.back() == "BN")
-            {
-                if (normalBulkPos != UINT_MAX)
-                {
-                    std::cout << "WARNING: Multiple bulk control files provided. Only using the first one!";
-                }
-                else
-                {
-                    normalBulkPos = counter;
-                }
-            }
-            if (splitVec.back() == "BT")
-            {
-            }
-            if (splitVec.back() == "CN")
-            {
-                normalCellPos.push_back(counter);
-            }
-            if (splitVec.back() == "CT")
-            {
-                tumorCellPos.push_back(counter);
-                boost::split(splitVecEntry, splitVec[0], boost::is_any_of("/"));
-                config.cellNames.push_back(splitVecEntry.back());
-            }
-            ++counter;
-        }
-    }
+    tbb::parallel_pipeline(
+            3 /*number of filters?*/,
+            tbb::make_filter<void, std::pair<std::string, unsigned>>(
+                    tbb::filter::serial_in_order,
+                    [&](tbb::flow_control &fc) {
+                        std::string currLine;
+                        getline(inputStream, currLine);
+                        if (currLine == "") {
+                            fc.stop();
+                        }
+                        ++counter;
+                        return std::pair<std::string, unsigned>(currLine, counter - 1);
+                    }) &
+            tbb::make_filter<std::pair<std::string, unsigned>, std::pair<std::vector<std::string>, unsigned>>(
+                    tbb::filter::parallel,
+
+                    [&](std::pair<std::string, unsigned> pair) {
+                        std::string currLine = pair.first;
+                        unsigned i = pair.second;
+                        std::vector<std::string> splitVec;
+                        boost::split(splitVec, currLine, boost::is_any_of("\t"));
+                        return std::pair<std::vector<std::string>, unsigned>(splitVec, i);
+                    }) &
+            tbb::make_filter<std::pair<std::vector<std::string>, unsigned>, void>(
+                    tbb::filter::serial_in_order,
+                    [&](std::pair<std::vector<std::string>, unsigned> pair) {
+                        std::vector<std::string> splitVec = pair.first;
+                        std::vector<std::string> splitVecEntry;
+                        unsigned i = pair.second;
+                        if (splitVec.back() == "BN") {
+                            if (normalBulkPos != UINT_MAX) {
+                                std::cout
+                                        << "WARNING: Multiple bulk control files provided. Only using the first one!";
+                            } else {
+                                normalBulkPos = i;
+                            }
+                        }
+                        if (splitVec.back() == "BT") {
+                        }
+                        if (splitVec.back() == "CN") {
+                            normalCellPos.push_back(i);
+                        }
+                        if (splitVec.back() == "CT") {
+                            tumorCellPos.push_back(i);
+                            boost::split(splitVecEntry, splitVec[0], boost::is_any_of("/"));
+                            config.cellNames.push_back(splitVecEntry.back());
+                        }
+                    })
+    );
 }
 
 

@@ -47,7 +47,7 @@ link_directories(${Boost_LIBRARY_DIRS})
 add_definitions (${SEQAN_DEFINITIONS})
 
 # Add CXX flags found by find_package (SeqAn).
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SEQAN_CXX_FLAGS}")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SEQAN_CXX_FLAGS} -ltbb")
 
 # Add executable and link against SeqAn dependencies.
 add_executable(sciphi src/findBestTrees.cpp)
